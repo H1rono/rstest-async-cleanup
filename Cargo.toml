@@ -1,0 +1,11 @@
+[package]
+name = "rstest-async-cleanup"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+rstest = "0.24.0"
+sqlx.version = "0.8.3"
+sqlx.features = ["mysql", "runtime-tokio", "tls-rustls"]
+tokio = { version = "1.43.0", features = ["full"] }
