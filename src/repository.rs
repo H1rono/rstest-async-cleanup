@@ -328,9 +328,13 @@ mod delete_after_test {
 
     impl Drop for SendOnDrop {
         fn drop(&mut self) {
-            if let Some(tx) = self.tx.take() {
-                let _ = tx.send(());
-            }
+            let Some(tx) = self.tx.take() else {
+                return;
+            };
+            match tx.send(()) {
+                Ok(()) => tracing::trace!("Signal sent"),
+                Err(()) => tracing::error!("Failed to send signal"),
+            };
         }
     }
 
@@ -338,15 +342,26 @@ mod delete_after_test {
         _guard: SendOnDrop,
     }
 
+    #[tracing::instrument(
+        name = "delete_after_test",
+        skip(repository, entry),
+        fields(id = %entry.id),
+    )]
     pub fn new(repository: &super::Repository, entry: &super::Entry) -> DeleteAfterTest {
         let (tx, rx) = oneshot::channel();
         let repository = repository.clone();
         let id = entry.id;
         let _handle = tokio::spawn(async move {
-            let _ = rx.await;
+            let received = rx.await;
+            tracing::trace!(?received, "Received signal");
             let res = repository.delete_entry(id).await;
             if let Err(err) = res {
-                eprintln!("Failed to delete entry {}: {:?}", id, err);
+                tracing::error!(
+                    error = &err as &dyn std::error::Error,
+                    "Failed to delete entry"
+                );
+            } else {
+                tracing::info!("Entry deleted");
             }
         });
         let _guard = SendOnDrop { tx: Some(tx) };
