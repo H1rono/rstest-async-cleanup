@@ -1,0 +1,38 @@
+name: rstest-async-cleanup
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: db
+      MYSQL_PASSWORD: password
+      MYSQL_DATABASE: asynccleanup
+    expose:
+      - 3306
+    ports:
+      - '3306:3306'
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+  dbgate:
+    # https://hub.docker.com/r/dbgate/dbgate
+    image: dbgate/dbgate:6.1.3
+    restart: always
+    environment:
+      # https://dbgate.org/docs/env-variables.html
+      - CONNECTIONS=db
+      - LABEL_db=MySQL
+      - SERVER_db=db
+      - USER_db=db
+      - PASSWORD_db=password
+      - PORT_db=mysql
+      - DATABASE_db=asynccleanup
+      - ENGINE_db=mysql@dbgate-plugin-mysql
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '3000:3000'
