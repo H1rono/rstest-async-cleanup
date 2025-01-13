@@ -306,6 +306,19 @@ impl Repository {
 // MARK: tests
 
 #[cfg(test)]
+fn setup_tracing_subscriber() {
+    use std::sync::OnceLock;
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    static SUBSCRIBER: OnceLock<()> = OnceLock::new();
+
+    *SUBSCRIBER.get_or_init(|| {
+        let env_filter = EnvFilter::try_from_default_env().unwrap_or_default();
+        fmt().with_env_filter(env_filter).init();
+    })
+}
+
+#[cfg(test)]
 mod delete_after_test {
     use tokio::sync::oneshot;
 
@@ -343,7 +356,7 @@ mod delete_after_test {
 
 #[cfg(test)]
 mod tests {
-    use super::delete_after_test;
+    use super::{delete_after_test, setup_tracing_subscriber};
     use crate::Repository;
 
     async fn load_repository() -> Repository {
@@ -369,6 +382,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_entry() {
+        let () = setup_tracing_subscriber();
         let repository = load_repository().await;
         let entry = repository
             .create_entry(super::CreateEntry {
