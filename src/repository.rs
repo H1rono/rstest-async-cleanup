@@ -118,8 +118,10 @@ impl Builder<String, String, String, u16, String> {
 }
 
 impl Repository {
+    #[tracing::instrument(skip(self))]
     pub async fn migrate(&self) -> sqlx::Result<()> {
         MIGRATOR.run(&self.pool).await?;
+        tracing::info!("Database migration completed");
         Ok(())
     }
 }
@@ -183,9 +185,11 @@ pub struct CreateEntry {
 // MARK: Entry operations
 
 impl Repository {
+    #[tracing::instrument(skip_all)]
     pub async fn create_entry(&self, entry: CreateEntry) -> sqlx::Result<Entry> {
         let id = uuid::Uuid::now_v7();
         let CreateEntry { key, value } = entry;
+        tracing::debug!(%id, "Creating entry");
         let _res = sqlx::query(
             r#"
             INSERT INTO `entries` (`id`, `key`, `value`)
@@ -197,6 +201,7 @@ impl Repository {
         .bind(value)
         .execute(&self.pool)
         .await?;
+        tracing::debug!(%id, "Entry created");
         let entry: DbEntry = sqlx::query_as(
             r#"
             SELECT * FROM `entries`
@@ -209,6 +214,7 @@ impl Repository {
         Ok(entry.into())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_entry(&self, id: uuid::Uuid) -> sqlx::Result<Option<Entry>> {
         let entry: Option<DbEntry> = sqlx::query_as(
             r#"
@@ -219,9 +225,11 @@ impl Repository {
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
+        tracing::debug!(exists = entry.is_some(), "Fetched entry");
         Ok(entry.map(Entry::from))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn list_entries(&self) -> sqlx::Result<Vec<Entry>> {
         let entries: Vec<DbEntry> = sqlx::query_as(
             r#"
@@ -230,15 +238,18 @@ impl Repository {
         )
         .fetch_all(&self.pool)
         .await?;
+        tracing::debug!(count = entries.len(), "Fetched entries");
         Ok(entries.into_iter().map(Entry::from).collect())
     }
 
+    #[tracing::instrument(skip(self, entry))]
     pub async fn update_entry(
         &self,
         id: uuid::Uuid,
         entry: CreateEntry,
     ) -> sqlx::Result<Option<Entry>> {
         let CreateEntry { key, value } = entry;
+        tracing::debug!("Updating entry");
         let _res = sqlx::query(
             r#"
             UPDATE `entries`
@@ -251,6 +262,7 @@ impl Repository {
         .bind(id)
         .execute(&self.pool)
         .await?;
+        tracing::debug!("Entry updated");
         let entry: Option<DbEntry> = sqlx::query_as(
             r#"
             SELECT * FROM `entries`
@@ -263,9 +275,11 @@ impl Repository {
         Ok(entry.map(Entry::from))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn delete_entry(&self, id: uuid::Uuid) -> sqlx::Result<Option<Entry>> {
+        tracing::debug!("Deleting entry");
         // TODO: check rows affected to return None if no rows were updated
-        let _res = sqlx::query(
+        let res = sqlx::query(
             r#"
             UPDATE `entries`
             SET `deleted_at` = NOW()
@@ -275,6 +289,7 @@ impl Repository {
         .bind(id)
         .execute(&self.pool)
         .await?;
+        tracing::debug!(result = ?res, "Entry deleted");
         let entry: DbEntry = sqlx::query_as(
             r#"
             SELECT * FROM `entries`
