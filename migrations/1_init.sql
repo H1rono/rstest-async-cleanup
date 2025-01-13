@@ -1,6 +1,6 @@
 -- key-value store
 
-CREATE TABLE IF NOT EXISTS `kv`
+CREATE TABLE IF NOT EXISTS `entries`
 (
     `id`         BINARY(16) NOT NULL PRIMARY KEY,
     `key`        TEXT,

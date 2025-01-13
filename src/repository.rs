@@ -188,7 +188,7 @@ impl Repository {
         let CreateEntry { key, value } = entry;
         let _res = sqlx::query(
             r#"
-            INSERT INTO entries (id, key, value)
+            INSERT INTO `entries` (`id`, `key`, `value`)
             VALUES (?, ?, ?)
             "#,
         )
@@ -199,8 +199,8 @@ impl Repository {
         .await?;
         let entry: DbEntry = sqlx::query_as(
             r#"
-            SELECT * FROM entries
-            WHERE id = ?
+            SELECT * FROM `entries`
+            WHERE `id` = ?
             "#,
         )
         .bind(id)
@@ -212,8 +212,8 @@ impl Repository {
     pub async fn get_entry(&self, id: uuid::Uuid) -> sqlx::Result<Option<Entry>> {
         let entry: Option<DbEntry> = sqlx::query_as(
             r#"
-            SELECT * FROM entries
-            WHERE id = ?
+            SELECT * FROM `entries`
+            WHERE `id` = ?
             "#,
         )
         .bind(id)
@@ -225,7 +225,7 @@ impl Repository {
     pub async fn list_entries(&self) -> sqlx::Result<Vec<Entry>> {
         let entries: Vec<DbEntry> = sqlx::query_as(
             r#"
-            SELECT * FROM entries
+            SELECT * FROM `entries`
             "#,
         )
         .fetch_all(&self.pool)
@@ -241,9 +241,9 @@ impl Repository {
         let CreateEntry { key, value } = entry;
         let _res = sqlx::query(
             r#"
-            UPDATE entries
-            SET key = ?, value = ?, updated_at = NOW()
-            WHERE id = ?
+            UPDATE `entries`
+            SET `key` = ?, `value` = ?, `updated_at` = NOW()
+            WHERE `id` = ?
             "#,
         )
         .bind(key)
@@ -253,8 +253,8 @@ impl Repository {
         .await?;
         let entry: Option<DbEntry> = sqlx::query_as(
             r#"
-            SELECT * FROM entries
-            WHERE id = ?
+            SELECT * FROM `entries`
+            WHERE `id` = ?
             "#,
         )
         .bind(id)
@@ -267,9 +267,9 @@ impl Repository {
         // TODO: check rows affected to return None if no rows were updated
         let _res = sqlx::query(
             r#"
-            UPDATE entries
-            SET deleted_at = NOW()
-            WHERE id = ?
+            UPDATE `entries`
+            SET `deleted_at` = NOW()
+            WHERE `id` = ?
             "#,
         )
         .bind(id)
@@ -277,13 +277,93 @@ impl Repository {
         .await?;
         let entry: DbEntry = sqlx::query_as(
             r#"
-            SELECT * FROM entries
-            WHERE id = ?
+            SELECT * FROM `entries`
+            WHERE `id` = ?
             "#,
         )
         .bind(id)
         .fetch_one(&self.pool)
         .await?;
         Ok(Some(entry.into()))
+    }
+}
+
+// MARK: tests
+
+#[cfg(test)]
+mod delete_after_test {
+    use tokio::sync::oneshot;
+
+    struct SendOnDrop {
+        tx: Option<oneshot::Sender<()>>,
+    }
+
+    impl Drop for SendOnDrop {
+        fn drop(&mut self) {
+            if let Some(tx) = self.tx.take() {
+                let _ = tx.send(());
+            }
+        }
+    }
+
+    pub struct DeleteAfterTest {
+        _guard: SendOnDrop,
+    }
+
+    pub fn new(repository: &super::Repository, entry: &super::Entry) -> DeleteAfterTest {
+        let (tx, rx) = oneshot::channel();
+        let repository = repository.clone();
+        let id = entry.id;
+        let _handle = tokio::spawn(async move {
+            let _ = rx.await;
+            let res = repository.delete_entry(id).await;
+            if let Err(err) = res {
+                eprintln!("Failed to delete entry {}: {:?}", id, err);
+            }
+        });
+        let _guard = SendOnDrop { tx: Some(tx) };
+        DeleteAfterTest { _guard }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::delete_after_test;
+    use crate::Repository;
+
+    async fn load_repository() -> Repository {
+        use tokio::sync::OnceCell;
+
+        static REPOSITORY: OnceCell<Repository> = OnceCell::const_new();
+
+        REPOSITORY
+            .get_or_init(|| async {
+                Repository::builder()
+                    .hostname("localhost")
+                    .username("db")
+                    .password("password")
+                    .port(3306)
+                    .database("asynccleanup")
+                    .build_with_migrate()
+                    .await
+                    .unwrap()
+            })
+            .await
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn test_create_entry() {
+        let repository = load_repository().await;
+        let entry = repository
+            .create_entry(super::CreateEntry {
+                key: "test".to_string(),
+                value: "test".to_string(),
+            })
+            .await
+            .unwrap();
+        let _guard = delete_after_test::new(&repository, &entry);
+        assert_eq!(entry.key, "test");
+        assert_eq!(entry.value, "test");
     }
 }
