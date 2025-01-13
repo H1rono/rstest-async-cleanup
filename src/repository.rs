@@ -338,8 +338,27 @@ mod delete_after_test {
         }
     }
 
+    struct BlockOnDrop {
+        task: Option<tokio::task::JoinHandle<()>>,
+    }
+
+    impl Drop for BlockOnDrop {
+        fn drop(&mut self) {
+            let Some(task) = self.task.take() else {
+                return;
+            };
+            // FIXME: THIS HUNGS FOREVER
+            let std_handle = std::thread::spawn(move || futures::executor::block_on(task));
+            match std_handle.join().expect("Task panicked") {
+                Ok(()) => tracing::trace!("Task completed"),
+                Err(err) => tracing::error!(error = &err as &dyn std::error::Error, "Task failed"),
+            };
+        }
+    }
+
     pub struct DeleteAfterTest {
-        _guard: SendOnDrop,
+        _send_guard: SendOnDrop,
+        _block_guard: BlockOnDrop,
     }
 
     #[tracing::instrument(
@@ -351,7 +370,7 @@ mod delete_after_test {
         let (tx, rx) = oneshot::channel();
         let repository = repository.clone();
         let id = entry.id;
-        let _handle = tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let received = rx.await;
             tracing::trace!(?received, "Received signal");
             let res = repository.delete_entry(id).await;
@@ -364,8 +383,12 @@ mod delete_after_test {
                 tracing::info!("Entry deleted");
             }
         });
-        let _guard = SendOnDrop { tx: Some(tx) };
-        DeleteAfterTest { _guard }
+        let _send_guard = SendOnDrop { tx: Some(tx) };
+        let _block_guard = BlockOnDrop { task: Some(handle) };
+        DeleteAfterTest {
+            _send_guard,
+            _block_guard,
+        }
     }
 }
 
